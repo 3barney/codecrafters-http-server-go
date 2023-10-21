@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path"
@@ -59,6 +60,25 @@ func handleClientConnection(connection net.Conn) {
 	bodyItem := extractUrlFromHttpHeaderPath(headerRequestPath)
 
 	switch headerMethod {
+	case "POST":
+		if strings.HasPrefix(headerRequestPath, "/files") {
+			var response string
+			fileName := strings.TrimPrefix(headerRequestPath, "/files/")
+			bodyRequest := string(requestLines[6])
+
+			err := os.WriteFile(path.Join(*directory, fileName), []byte(bodyRequest), fs.ModePerm)
+			if err != nil {
+				fmt.Println("Writing to file failed", err.Error())
+				os.Exit(1)
+			}
+
+			response = "HTTP/1.1 201 Created\r\n\r\n"
+			_, err = connection.Write([]byte(response))
+			if err != nil {
+				fmt.Println("Error writing to connection: ", err.Error())
+				os.Exit(1)
+			}
+		}
 	case "GET":
 		if headerRequestPath == "/" {
 			_, err = connection.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
@@ -111,19 +131,6 @@ func handleClientConnection(connection net.Conn) {
 	}
 }
 
-/*
-*
-filename := subpaths[2]
-+ 				fileContent, err := os.ReadFile(path.Join(*dir, filename))
-+ 				if err != nil {
-+ 					response = "HTTP/1.1 404 Not Found\r\n\r\n"
-+ 				} else {
-+ 					response = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n", len(fileContent))
-+ 					response += string(fileContent) + "\r\n"
-1
-+ 				}
-*
-*/
 func readHttpHeadersFromRequestLine(headers []string) (
 	httpHeaderMethod string,
 	httpRequestPath string,
