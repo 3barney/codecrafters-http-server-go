@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -52,6 +53,9 @@ func handleClientConnection(connection net.Conn) {
 		os.Exit(1)
 	}
 
+	// trims the null bytes (\x00) from the beginning and end of the byte slice
+	buffer = bytes.Trim(buffer, "\x00")
+
 	// Read from buffer and set response correctly
 	request := string(buffer)
 	requestLines := strings.Split(request, "\r\n")
@@ -64,9 +68,9 @@ func handleClientConnection(connection net.Conn) {
 		if strings.HasPrefix(headerRequestPath, "/files") {
 			var response string
 			fileName := strings.TrimPrefix(headerRequestPath, "/files/")
-			bodyRequest := string(requestLines[6])
+			bodyRequest := []byte(requestLines[6])
 
-			err := os.WriteFile(path.Join(*directory, fileName), []byte(bodyRequest), fs.ModePerm)
+			err := os.WriteFile(path.Join(*directory, fileName), bodyRequest, fs.ModeTemporary)
 			if err != nil {
 				fmt.Println("Writing to file failed", err.Error())
 				os.Exit(1)
