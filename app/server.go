@@ -43,6 +43,8 @@ func handleClientConnection(connection net.Conn) {
 
 	// Read from buffer and set response correctly
 	request := string(buffer)
+	fmt.Printf(" This is the request for http endpoint \n", request)
+
 	requestLines := strings.Split(request, "\r\nn")
 
 	headerMethod, headerRequestPath := readHttpHeadersFromRequestLine(requestLines)
