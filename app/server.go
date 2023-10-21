@@ -46,11 +46,22 @@ func handleClientConnection(connection net.Conn) {
 	requestLines := strings.Split(request, "\r\nn")
 
 	headerMethod, headerRequestPath := readHttpHeadersFromRequestLine(requestLines)
+	bodyItem := extractUrlFromHttpHeaderPath(headerRequestPath)
 
 	switch headerMethod {
 	case "GET":
 		if headerRequestPath == "/" {
 			_, err = connection.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+			if err != nil {
+				fmt.Println("Error writing to connection: ", err.Error())
+				os.Exit(1)
+			}
+		} else if strings.HasPrefix(headerRequestPath, "/echo") {
+			bodyResponse := string(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(bodyItem), bodyItem))
+			fmt.Printf("Header request path %s \n", headerRequestPath)
+			fmt.Printf("Body Response %s \n", bodyResponse)
+
+			_, err = connection.Write([]byte(bodyResponse))
 			if err != nil {
 				fmt.Println("Error writing to connection: ", err.Error())
 				os.Exit(1)
@@ -75,4 +86,11 @@ func readHttpHeadersFromRequestLine(headers []string) (httpHeaderMethod string, 
 	path := headerItems[1]
 
 	return method, path
+}
+
+func extractUrlFromHttpHeaderPath(headerPath string) string {
+	pathItems := strings.TrimPrefix(headerPath, "/echo/")
+
+	fmt.Println(pathItems)
+	return pathItems
 }
