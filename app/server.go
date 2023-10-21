@@ -11,6 +11,27 @@ import (
 	"strings"
 )
 
+const (
+	HostHeader           = "Host"
+	UserAgentHeader      = "User-Agent"
+	AcceptEncodingHeader = "Accept-Encoding"
+	ContentLengthHeader  = "Content-Length"
+)
+
+const (
+	GetMethod  = "GET"
+	PostMethod = "POST"
+)
+
+const (
+	RootPath      = "/"
+	EchoPath      = "/echo"
+	UserAgentPath = "/User-Agent"
+	FilesPath     = "/files"
+)
+
+const FileNamePath = "/files/"
+
 type Request struct {
 	Method         string
 	Path           string
@@ -44,8 +65,6 @@ func main() {
 			fmt.Println("Error accepting connection: ", err.Error())
 			os.Exit(1)
 		}
-
-		// Handle connections
 		go handleClientConnection(conn)
 	}
 }
@@ -62,61 +81,30 @@ func handleClientConnection(connection net.Conn) {
 		os.Exit(1)
 	}
 
-	// trims the null bytes (\x00) from the beginning and end of the byte slice
+	// trims the null bytes (\x00) at end since we fill it to 1024
 	buffer = bytes.Trim(buffer, "\x00")
 
-	// Read from buffer and set response correctly
-	request := string(buffer)
-	requestLines := strings.Split(request, "\r\n")
+	httpRequestStruct := requestBufferToRequestStruct(buffer)
 
-	//headerMethod, headerRequestPath := extractHttpMethodAndRequestPath(requestLines)
-
-	responseData := formatRequestBufferToRequestStruct(buffer)
-
-	bodyItem := extractUrlFromHttpHeaderPath(responseData.Path)
-	// fmt.Printf("RESPONSE ITEM DATA : %v with type \n", responseData)
-
-	switch responseData.Method {
-	case "POST":
-		if strings.HasPrefix(responseData.Path, "/files") {
-			var response string
-			fileName := strings.TrimPrefix(responseData.Path, "/files/")
-			bodyRequest := []byte(requestLines[6])
-
-			err := os.WriteFile(path.Join(*directory, fileName), bodyRequest, fs.ModeTemporary)
-			if err != nil {
-				fmt.Println("Writing to file failed", err.Error())
-				os.Exit(1)
-			}
-
-			response = "HTTP/1.1 201 Created\r\n\r\n"
-			writeHttpResponse(connection, response)
+	switch httpRequestStruct.Method {
+	case PostMethod:
+		if strings.HasPrefix(httpRequestStruct.Path, FilesPath) {
+			fileName := strings.TrimPrefix(httpRequestStruct.Path, FileNamePath)
+			handlePostFilesPath(connection, httpRequestStruct, directory, fileName)
 		}
-	case "GET":
-		if responseData.Path == "/" {
-			writeHttpResponse(connection, "HTTP/1.1 200 OK\r\n\r\n")
-		} else if strings.HasPrefix(responseData.Path, "/echo") {
-			bodyResponse := string(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(bodyItem), bodyItem))
-
-			writeHttpResponse(connection, bodyResponse)
-		} else if strings.HasPrefix(responseData.Path, "/user-agent") {
-			value := extractUserAgent(requestLines)
-			bodyResponse := string(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(value), value))
-
-			writeHttpResponse(connection, bodyResponse)
-		} else if strings.HasPrefix(responseData.Path, "/files") {
-			var response string
-			fileName := strings.TrimPrefix(responseData.Path, "/files/")
-			contents, err := os.ReadFile(path.Join(*directory, fileName))
-			if err != nil {
-				response = "HTTP/1.1 404 Not Found\r\n\r\n"
-			} else {
-				response = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(contents), string(contents))
-			}
-
-			writeHttpResponse(connection, response)
-		} else {
-			writeHttpResponse(connection, "HTTP/1.1 404 Not Found\r\n\r\n")
+	case GetMethod:
+		switch {
+		case httpRequestStruct.Path == RootPath:
+			handleRootPath(connection)
+		case strings.HasPrefix(httpRequestStruct.Path, EchoPath):
+			handleEchoPath(connection, httpRequestStruct.Path)
+		case strings.HasPrefix(httpRequestStruct.Path, UserAgentPath):
+			handleUserAgentPath(connection, httpRequestStruct.UserAgent)
+		case strings.HasPrefix(httpRequestStruct.Path, FilesPath):
+			fileName := strings.TrimPrefix(httpRequestStruct.Path, FileNamePath)
+			handleGetFilesPath(connection, directory, fileName)
+		default:
+			handleUnknownPath(connection)
 		}
 	default:
 		fmt.Println("Not implemented method")
@@ -124,45 +112,52 @@ func handleClientConnection(connection net.Conn) {
 	}
 }
 
-func formatRequestBufferToRequestStruct(buffer []byte) Request {
+func requestBufferToRequestStruct(buffer []byte) Request {
 	requestLines := strings.Split(string(buffer), "\r\n")
 	headerLineItem := strings.Split(requestLines[0], " ")
 
-	requestResponse := Request{}
-	requestResponse.Method = headerLineItem[0]
-	requestResponse.Path = headerLineItem[1]
-	requestResponse.Version = headerLineItem[2]
-
-	fmt.Printf("RESPONSE ITEM DATA ONE : %v \n", requestLines)
+	requestResponse := Request{
+		Method:  headerLineItem[0],
+		Path:    headerLineItem[1],
+		Version: headerLineItem[2],
+	}
 
 	for _, line := range requestLines[1:] {
 		if line == "" {
 			break
 		}
 
-		headerParts := strings.Split(line, ": ")
+		name, value := parseHeader(line)
 
-		switch headerParts[0] {
-		case "Host":
-			requestResponse.Host = headerParts[1]
-		case "User-Agent":
-			requestResponse.UserAgent = headerParts[1]
-		case "Accept-Encoding":
-			requestResponse.AcceptEncoding = headerParts[1]
-		case "Content-Length":
-			requestResponse.ContentLength = headerParts[1]
-		default:
-			fmt.Printf("Unhandled case  key: %s value: %s\n", headerParts[0], headerParts[1])
+		headerMap := map[string]*string{
+			HostHeader:           &requestResponse.Host,
+			UserAgentHeader:      &requestResponse.UserAgent,
+			AcceptEncodingHeader: &requestResponse.AcceptEncoding,
+			ContentLengthHeader:  &requestResponse.ContentLength,
+		}
+
+		if destination, exists := headerMap[name]; exists {
+			*destination = value
+		} else {
+			fmt.Printf("Unhandled case  key: %s value: %s\n", name, value)
 		}
 	}
 
 	fmt.Printf("Type: %T, Value: %+v\n", requestResponse, requestResponse)
 
-	if len(requestLines) > len(requestLines[1:])+1 {
-		requestResponse.Body = requestLines[len(requestLines[1:])+1]
+	if requestResponse.Method == "POST" && len(requestLines) >= 6 {
+		requestResponse.Body = requestLines[6]
 	}
 
 	return requestResponse
+}
+
+func parseHeader(header string) (string, string) {
+	parts := strings.SplitN(header, ": ", 2)
+	if len(parts) < 2 {
+		return parts[0], ""
+	}
+	return parts[0], parts[1]
 }
 
 func writeHttpResponse(conn net.Conn, response string) {
@@ -173,29 +168,44 @@ func writeHttpResponse(conn net.Conn, response string) {
 	}
 }
 
-func extractHttpMethodAndRequestPath(headers []string) (
-	httpMethod string,
-	requestPath string,
-) {
-	headerItems := strings.Split(headers[0], " ")
-	method := headerItems[0]
-	path := headerItems[1]
-
-	return method, path
+func handleRootPath(connection net.Conn) {
+	writeHttpResponse(connection, "HTTP/1.1 200 OK\r\n\r\n")
 }
 
-func extractUrlFromHttpHeaderPath(headerPath string) string {
-	pathItems := strings.TrimPrefix(headerPath, "/echo/")
-
-	fmt.Println(pathItems)
-	return pathItems
+func handleEchoPath(connection net.Conn, path string) {
+	bodyItem := strings.TrimPrefix(path, "/echo/")
+	bodyResponse := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(bodyItem), bodyItem)
+	writeHttpResponse(connection, bodyResponse)
 }
 
-func extractUserAgent(requestLines []string) string {
-	if len(requestLines) < 2 {
-		fmt.Println("Missing user agent property")
+func handleUserAgentPath(connection net.Conn, userAgent string) {
+	bodyResponse := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgent), userAgent)
+	writeHttpResponse(connection, bodyResponse)
+}
+
+func handleGetFilesPath(connection net.Conn, directory *string, fileName string) {
+	contents, err := os.ReadFile(path.Join(*directory, fileName))
+	if err != nil {
+		writeHttpResponse(connection, "HTTP/1.1 404 Not Found\r\n\r\n")
+		return
+	}
+
+	response := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(contents), string(contents))
+	writeHttpResponse(connection, response)
+}
+
+func handlePostFilesPath(connection net.Conn, request Request, directory *string, fileName string) {
+
+	err := os.WriteFile(path.Join(*directory, fileName), []byte(request.Body), fs.ModeTemporary)
+	if err != nil {
+		fmt.Println("Writing to file failed", err.Error())
 		os.Exit(1)
 	}
 
-	return strings.TrimPrefix(requestLines[2], "User-Agent: ")
+	response := "HTTP/1.1 201 Created\r\n\r\n"
+	writeHttpResponse(connection, response)
+}
+
+func handleUnknownPath(connection net.Conn) {
+	writeHttpResponse(connection, "HTTP/1.1 404 Not Found\r\n\r\n")
 }
