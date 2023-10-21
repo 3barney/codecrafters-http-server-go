@@ -1,13 +1,20 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"strings"
 )
 
+var directory *string
+
 func main() {
+	directory = flag.String("directory", "/", "File store location")
+	flag.Parse()
+
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
 
@@ -17,10 +24,10 @@ func main() {
 		fmt.Println("Failed to bind to port 4221")
 		os.Exit(1)
 	}
-	// defer listener.Close()
+
+	fmt.Println("Directory: ", *directory)
 
 	for {
-
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
@@ -76,6 +83,21 @@ func handleClientConnection(connection net.Conn) {
 				fmt.Println("Error writing to connection: ", err.Error())
 				os.Exit(1)
 			}
+		} else if strings.HasPrefix(headerRequestPath, "/files") {
+			var response string
+			fileName := strings.TrimPrefix(headerRequestPath, "/files/")
+			contents, err := os.ReadFile(path.Join(*directory, fileName))
+			if err != nil {
+				response = "HTTP/1.1 404 Not Found\r\n\r\n"
+			} else {
+				response = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(contents), string(contents))
+			}
+
+			_, err = connection.Write([]byte(response))
+			if err != nil {
+				fmt.Println("Error writing to connection: ", err.Error())
+				os.Exit(1)
+			}
 		} else {
 			_, err = connection.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 			if err != nil {
@@ -83,13 +105,25 @@ func handleClientConnection(connection net.Conn) {
 				os.Exit(1)
 			}
 		}
-
 	default:
 		fmt.Println("Not implemented method")
 		os.Exit(1)
 	}
 }
 
+/*
+*
+filename := subpaths[2]
++ 				fileContent, err := os.ReadFile(path.Join(*dir, filename))
++ 				if err != nil {
++ 					response = "HTTP/1.1 404 Not Found\r\n\r\n"
++ 				} else {
++ 					response = fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n", len(fileContent))
++ 					response += string(fileContent) + "\r\n"
+1
++ 				}
+*
+*/
 func readHttpHeadersFromRequestLine(headers []string) (
 	httpHeaderMethod string,
 	httpRequestPath string,
