@@ -26,7 +26,7 @@ const (
 const (
 	RootPath      = "/"
 	EchoPath      = "/echo"
-	UserAgentPath = "/User-Agent"
+	UserAgentPath = "/user-agent"
 	FilesPath     = "/files"
 )
 
