@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -30,6 +31,7 @@ func main() {
 
 func handleClientConnection(connection net.Conn) {
 	defer connection.Close()
+
 	// Read and process data from the client
 	buffer := make([]byte, 1024)
 
@@ -39,12 +41,38 @@ func handleClientConnection(connection net.Conn) {
 		os.Exit(1)
 	}
 
-	// Write data back to the client
-	data := []byte("HTTP/1.1 200 OK\r\n\r\n")
-	_, err = connection.Write(data)
+	// Read from buffer and set response correctly
+	request := string(buffer)
+	requestLines := strings.Split(request, "\r\nn")
 
-	if err != nil {
-		fmt.Println("Error writing back to connection")
+	headerMethod, headerRequestPath := readHttpHeadersFromRequestLine(requestLines)
+
+	switch headerMethod {
+	case "GET":
+		if headerRequestPath == "/" {
+			_, err = connection.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+			if err != nil {
+				fmt.Println("Error writing to connection: ", err.Error())
+				os.Exit(1)
+			}
+		} else {
+			_, err = connection.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+			if err != nil {
+				fmt.Println("Error writing to connection: ", err.Error())
+				os.Exit(1)
+			}
+		}
+
+	default:
+		fmt.Println("Not implemented method")
 		os.Exit(1)
 	}
+}
+
+func readHttpHeadersFromRequestLine(headers []string) (httpHeaderMethod string, httpRequestPath string) {
+	headerItems := strings.Split(headers[0], " ")
+	method := headerItems[0]
+	path := headerItems[1]
+
+	return method, path
 }
