@@ -43,9 +43,7 @@ func handleClientConnection(connection net.Conn) {
 
 	// Read from buffer and set response correctly
 	request := string(buffer)
-	fmt.Printf(" This is the request for http endpoint \n", request)
-
-	requestLines := strings.Split(request, "\r\nn")
+	requestLines := strings.Split(request, "\r\n")
 
 	headerMethod, headerRequestPath := readHttpHeadersFromRequestLine(requestLines)
 	bodyItem := extractUrlFromHttpHeaderPath(headerRequestPath)
@@ -60,8 +58,15 @@ func handleClientConnection(connection net.Conn) {
 			}
 		} else if strings.HasPrefix(headerRequestPath, "/echo") {
 			bodyResponse := string(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(bodyItem), bodyItem))
-			fmt.Printf("Header request path %s \n", headerRequestPath)
-			fmt.Printf("Body Response %s \n", bodyResponse)
+
+			_, err = connection.Write([]byte(bodyResponse))
+			if err != nil {
+				fmt.Println("Error writing to connection: ", err.Error())
+				os.Exit(1)
+			}
+		} else if strings.HasPrefix(headerRequestPath, "/user-agent") {
+			value := extractUserAgent(requestLines)
+			bodyResponse := string(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(value), value))
 
 			_, err = connection.Write([]byte(bodyResponse))
 			if err != nil {
@@ -82,7 +87,10 @@ func handleClientConnection(connection net.Conn) {
 	}
 }
 
-func readHttpHeadersFromRequestLine(headers []string) (httpHeaderMethod string, httpRequestPath string) {
+func readHttpHeadersFromRequestLine(headers []string) (
+	httpHeaderMethod string,
+	httpRequestPath string,
+) {
 	headerItems := strings.Split(headers[0], " ")
 	method := headerItems[0]
 	path := headerItems[1]
@@ -95,4 +103,13 @@ func extractUrlFromHttpHeaderPath(headerPath string) string {
 
 	fmt.Println(pathItems)
 	return pathItems
+}
+
+func extractUserAgent(requestLines []string) string {
+	if len(requestLines) < 2 {
+		fmt.Println("Missing user agent property")
+		os.Exit(1)
+	}
+
+	return strings.TrimPrefix(requestLines[2], "User-Agent: ")
 }
